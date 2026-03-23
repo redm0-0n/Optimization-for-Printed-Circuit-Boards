@@ -1,53 +1,42 @@
 import numpy as np
-from typing import List, Tuple, Optional, Dict
-from dataclasses import dataclass
-import heapq
-
-
-@dataclass
-class GridCell:
-    x: int
-    y: int
-    is_obstacle: bool = False
-    usage: int = 0
-    capacity: int = 3
-    layer: int = 0
+from typing import List, Tuple, Dict
 
 
 class RoutingGrid:
+    def __init__(self, width: int, height: int, obstacles: np.ndarray = None,
+                 cell_size: int = 400,
+                 llx: int = 0, lly: int = 0):
 
-    def __init__(self, width: int, height: int, obstacles: np.ndarray = None):
         self.width = width
         self.height = height
-        self.cells = {}
+
+        # 🔥 FIX: missing attributes (needed by plotter)
+        self.cell_size = cell_size
+        self.llx = llx
+        self.lly = lly
+
         self.obstacles = obstacles if obstacles is not None else np.zeros((height, width), dtype=bool)
         self.usage = np.zeros((height, width), dtype=int)
         self.capacity = np.ones((height, width), dtype=int) * 3
 
-    def get_neighbors(self, x: int, y: int) -> List[Tuple[int, int]]:
-        neighbors = []
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < self.width and 0 <= ny < self.height:
-                if not self.obstacles[ny, nx]:
-                    neighbors.append((nx, ny))
-        return neighbors
+    def to_grid(self, x: int, y: int) -> Tuple[int, int]:
+        """Physical -> grid coords"""
+        gx = (x - self.llx) // self.cell_size
+        gy = (y - self.lly) // self.cell_size
+        return int(gx), int(gy)
 
     def is_valid(self, x: int, y: int) -> bool:
-        if 0 <= x < self.width and 0 <= y < self.height:
-            return not self.obstacles[y, x]
-        return False
+        return (
+            0 <= x < self.width and
+            0 <= y < self.height and
+            not self.obstacles[y, x]
+        )
 
-    def get_congestion_cost(self, x: int, y: int) -> float:
-        if not self.is_valid(x, y):
-            return float('inf')
-
-        usage = self.usage[y, x]
-        capacity = self.capacity[y, x]
-
-        if usage >= capacity:
-            return 1.0 + (usage - capacity + 1) ** 2
-        return 0.1
+    def get_neighbors(self, x: int, y: int):
+        for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
+            nx, ny = x + dx, y + dy
+            if self.is_valid(nx, ny):
+                yield nx, ny
 
     def update_usage(self, path: List[Tuple[int, int]], delta: int = 1):
         for x, y in path:
@@ -55,19 +44,28 @@ class RoutingGrid:
                 self.usage[y, x] += delta
 
     def reset_usage(self):
-        self.usage = np.zeros((self.height, self.width), dtype=int)
+        self.usage.fill(0)
+
+    def get_congestion_cost(self, x: int, y: int) -> float:
+        if not self.is_valid(x, y):
+            return float("inf")
+
+        u = self.usage[y, x]
+        c = self.capacity[y, x]
+
+        return 1.0 + max(0, u - c) ** 2
 
     def get_total_wirelength(self, routes: Dict[str, List[Tuple[int, int]]]) -> int:
         total = 0
         for route in routes.values():
-            if route:
-                for i in range(len(route) - 1):
-                    total += abs(route[i + 1][0] - route[i][0]) + abs(route[i + 1][1] - route[i][1])
+            for i in range(len(route) - 1):
+                x1, y1 = route[i]
+                x2, y2 = route[i + 1]
+                total += abs(x1 - x2) + abs(y1 - y2)
         return total
 
-    def get_max_congestion(self) -> int:
-        return np.max(self.usage / self.capacity)
+    def get_max_congestion(self):
+        return float(np.max(self.usage / self.capacity))
 
-    def get_total_overflow(self) -> int:
-        overflow = np.maximum(0, self.usage - self.capacity)
-        return np.sum(overflow)
+    def get_total_overflow(self):
+        return int(np.sum(np.maximum(0, self.usage - self.capacity)))

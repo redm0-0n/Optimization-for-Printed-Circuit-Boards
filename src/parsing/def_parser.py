@@ -53,6 +53,9 @@ class RoutingGrid:
     capacity: np.ndarray
     cell_size: int = 400
 
+    llx: int = 0
+    lly: int = 0
+
     def get_cell(self, x: int, y: int) -> Dict:
         grid_x = x // self.cell_size
         grid_y = y // self.cell_size
@@ -76,6 +79,9 @@ class Board:
     components: Dict[str, Component]
     nets: Dict[str, Net]
     grid: RoutingGrid
+
+    llx: int = 0
+    lly: int = 0
 
 
 class DEFParser:
@@ -211,7 +217,9 @@ class DEFParser:
             obstacles=obstacles,
             usage=usage,
             capacity=capacity,
-            cell_size=grid_pitch
+            cell_size=grid_pitch,
+            llx=llx,
+            lly=lly
         )
 
         return Board(
@@ -221,5 +229,7 @@ class DEFParser:
             tracks=self.tracks,
             components=self.components,
             nets=self.nets,
-            grid=routing_grid
+            grid=routing_grid,
+            llx=llx,
+            lly=lly
         )

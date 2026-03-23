@@ -1,0 +1,11 @@
+{
+  "baseline": {
+    "total_wire_length": 73,
+    "max_congestion": 1.0,
+    "total_overflow": 0,
+    "routed_nets": 10,
+    "total_nets": 10,
+    "success_rate": 1.0,
+    "algorithm": "baseline"
+  }
+}
