@@ -15,7 +15,6 @@ def _parse_def(filepath: str):
     from src.parsing.def_parser import DEFParser
     return DEFParser().parse(filepath)
 
-
 router = APIRouter()
 
 
@@ -46,7 +45,6 @@ async def upload_def(file: UploadFile = File(...), db: Session = Depends(get_db)
     cell_size = parsed.grid.cell_size
     obstacles = parsed.grid.obstacles
 
-    # Convert nets to grid coordinates with SMART PIN PLACEMENT
     nets_data: dict = {}
     for net_name, net in parsed.nets.items():
         pts = []
@@ -55,31 +53,19 @@ async def upload_def(file: UploadFile = File(...), db: Session = Depends(get_db)
             if not comp:
                 continue
 
-            # Calculate exact grid coordinate of the component
             gx = (comp.x - llx) // cell_size
             gy = (comp.y - lly) // cell_size
 
-            # Search for a free cell adjacent to the 2x2 component block
-            # This prevents pins from getting trapped inside obstacles!
-            pin_x, pin_y = -1, -1
-            for dx, dy in [(2, 0), (2, 1), (0, 2), (1, 2), (-1, 0), (-1, 1), (0, -1), (1, -1)]:
-                tx, ty = gx + dx, gy + dy
-                if 0 <= tx < gw and 0 <= ty < gh and not obstacles[ty, tx]:
-                    pin_x, pin_y = tx, ty
-                    break
+            pin_x, pin_y = gx, gy
 
-            # Fallback if completely surrounded (rare)
-            if pin_x == -1:
-                pin_x, pin_y = gx + 2, gy + 1
-                if not (0 <= pin_x < gw and 0 <= pin_y < gh):
-                    continue
+            if 0 <= pin_x < gw and 0 <= pin_y < gh:
+                obstacles[pin_y, pin_x] = False
 
             pts.append([pin_x, pin_y])
 
         if len(pts) >= 2:
             nets_data[net_name] = pts
 
-    # Components in grid coords
     components_data: dict = {}
     for cname, comp in parsed.components.items():
         components_data[cname] = {
@@ -97,7 +83,7 @@ async def upload_def(file: UploadFile = File(...), db: Session = Depends(get_db)
         cell_size=cell_size,
         components_count=len(parsed.components),
         nets_count=len(parsed.nets),
-        obstacles_b64=array_to_b64(parsed.grid.obstacles),
+        obstacles_b64=array_to_b64(obstacles),
         capacity_b64=array_to_b64(parsed.grid.capacity),
         components_data=components_data,
         nets_data=nets_data,
