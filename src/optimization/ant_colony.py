@@ -1,7 +1,9 @@
 import numpy as np
 import random
+import heapq
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+import copy
 
 
 @dataclass
@@ -16,8 +18,8 @@ class AntColonyOptimization:
                  grid,
                  nets: Dict[str, List[Tuple[int, int]]],
                  fitness_evaluator,
-                 num_ants: int = 50,
-                 iterations: int = 100,
+                 num_ants: int = 20,
+                 iterations: int = 50,
                  alpha: float = 1.0,
                  beta: float = 2.0,
                  evaporation_rate: float = 0.1,
@@ -33,6 +35,8 @@ class AntColonyOptimization:
         self.evaporation_rate = evaporation_rate
         self.pheromone_deposit = pheromone_deposit
 
+        self.tau_min = 0.01
+        self.tau_max = 10.0
         self.pheromones = np.ones((grid.height, grid.width)) * 0.1
 
         self.best_solution: Optional[Dict[str, List[Tuple[int, int]]]] = None
@@ -40,91 +44,72 @@ class AntColonyOptimization:
         self.best_fitness_history: List[float] = []
 
     def run(self) -> Dict[str, List[Tuple[int, int]]]:
-
         for iteration in range(self.iterations):
-            solutions = []
+            iter_best_routes = None
+            iter_best_fitness = -float('inf')
 
             for ant_idx in range(self.num_ants):
-                solution = self._build_solution()
-                solutions.append(solution)
+                routes = self._build_solution()
+                fitness = self.fitness_evaluator.evaluate(self.grid, routes)
 
-            for solution in solutions:
-                fitness = self.fitness_evaluator.evaluate(self.grid, solution)
+                if fitness > iter_best_fitness:
+                    iter_best_fitness = fitness
+                    iter_best_routes = copy.deepcopy(routes)
 
                 if fitness > self.best_fitness:
                     self.best_fitness = fitness
-                    self.best_solution = solution.copy()
+                    self.best_solution = copy.deepcopy(routes)
 
-            self.best_fitness_history.append(self.best_fitness)
+            self.best_fitness_history.append(iter_best_fitness)
 
-            # Update pheromones
-            self._update_pheromones(solutions)
+            self._update_pheromones(iter_best_routes, iter_best_fitness)
 
         return self.best_solution
 
     def _build_solution(self) -> Dict[str, List[Tuple[int, int]]]:
-        from src.baselines.astar_routing import AStarRouter
-
         net_names = list(self.nets.keys())
         random.shuffle(net_names)
 
         self.grid.reset_usage()
-        router = AStarRouter(self.grid)
-
         routes = {}
 
         for net_name in net_names:
-            pins = self.nets[net_name]
-
-            if len(pins) == 1:
-                routes[net_name] = [pins[0]]
+            pins = self.nets.get(net_name, [])
+            if len(pins) < 2:
+                routes[net_name] = pins
                 continue
 
-            path = self._pheromone_guided_routing(pins, router)
-
+            path = self._route_net_with_pheromones(pins)
             if path:
                 routes[net_name] = path
                 self.grid.update_usage(path, delta=1)
             else:
-                path = router.route_net(pins)
-                if path:
-                    routes[net_name] = path
-                    self.grid.update_usage(path, delta=1)
-                else:
-                    routes[net_name] = []
+                routes[net_name] = []
 
         return routes
 
-    def _pheromone_guided_routing(self, pins: List[Tuple[int, int]], router) -> Optional[List[Tuple[int, int]]]:
-        if len(pins) <= 1:
-            return pins
-
+    def _route_net_with_pheromones(self, pins: List[Tuple[int, int]]) -> Optional[List[Tuple[int, int]]]:
         path = [pins[0]]
-        remaining = pins[1:]
+        remaining = list(pins[1:])
 
         while remaining:
             current = path[-1]
+            next_pin = min(remaining, key=lambda p: self._pheromone_distance(current, p))
 
-            next_pin = min(remaining, key=lambda p:
-            self._pheromone_distance(current, p))
-
-            segment = self._pheromone_astar(current, next_pin, router)
+            segment = self._astar_with_pheromone(current, next_pin)
 
             if segment is None:
                 return None
 
-            for point in segment[1:]:
-                path.append(point)
-
+            path.extend(segment[1:])
             remaining.remove(next_pin)
 
         return path
 
     def _pheromone_distance(self, start: Tuple[int, int], goal: Tuple[int, int]) -> float:
         manhattan = abs(start[0] - goal[0]) + abs(start[1] - goal[1])
-
-        total_pheromone = 0
         steps = max(abs(goal[0] - start[0]), abs(goal[1] - start[1]), 1)
+        total_pheromone = 0
 
         for t in range(steps + 1):
             x = int(start[0] + t * (goal[0] - start[0]) / steps)
@@ -133,34 +118,63 @@ class AntColonyOptimization:
                 total_pheromone += self.pheromones[y, x]
 
         avg_pheromone = total_pheromone / (steps + 1)
-
         return manhattan / (1 + avg_pheromone)
 
-    def _pheromone_astar(self, start: Tuple[int, int], goal: Tuple[int, int],
-                         router) -> Optional[List[Tuple[int, int]]]:
-        original_get_cost = self.grid.get_congestion_cost
+    def _astar_with_pheromone(self, start: Tuple[int, int], goal: Tuple[int, int]) -> Optional[List[Tuple[int, int]]]:
+        open_set = [(0, start)]
+        came_from = {}
+        g_score = {start: 0}
+        visited = set()
 
-        def enhanced_cost(x, y):
-            base_cost = original_get_cost(x, y)
-            pheromone = self.pheromones[y, x]
-            return base_cost / (1 + self.beta * pheromone)
+        while open_set:
+            _, current = heapq.heappop(open_set)
 
-        self.grid.get_congestion_cost = enhanced_cost
+            if current in visited:
+                continue
+            visited.add(current)
 
-        path = router._astar(start, goal)
+            if current == goal:
+                path = [current]
+                while current in came_from:
+                    current = came_from[current]
+                    path.append(current)
+                return path[::-1]
 
-        self.grid.get_congestion_cost = original_get_cost
+            for nx, ny in self.grid.get_neighbors(current[0], current[1]):
+                if (nx, ny) in visited:
+                    continue
 
-        return path
+                cong_cost = self.grid.get_congestion_cost(nx, ny)
 
-    def _update_pheromones(self, solutions: List[Dict[str, List[Tuple[int, int]]]]):
+                pheromone_bonus = self.pheromones[ny, nx] * self.beta
+
+                exploration_noise = random.uniform(0, 1) * self.alpha * 3.0
+
+                move_cost = 1.0 + 0.5 * cong_cost - pheromone_bonus + exploration_noise
+                if move_cost < 0.1:
+                    move_cost = 0.1
+
+                tentative_g = g_score[current] + move_cost
+
+                if (nx, ny) not in g_score or tentative_g < g_score[(nx, ny)]:
+                    g_score[(nx, ny)] = tentative_g
+                    h = abs(nx - goal[0]) + abs(ny - goal[1])
+                    heapq.heappush(open_set, (tentative_g + h, (nx, ny)))
+                    came_from[(nx, ny)] = current
+
+        return None
+
+    def _update_pheromones(self, iter_best_routes: Dict, iter_best_fitness: float):
         self.pheromones *= (1 - self.evaporation_rate)
 
-        for solution in solutions:
-            fitness = self.fitness_evaluator.evaluate(self.grid, solution)
-            deposit = self.pheromone_deposit * (fitness - self.best_fitness + 1)
+        if not iter_best_routes:
+            return
 
-            for route in solution.values():
+        deposit = abs(iter_best_fitness) / 1000 + 0.5
+
+        for route in iter_best_routes.values():
+            if route:
                 for x, y in route:
-                    if 0 <= x < self.grid.width and 0 <= y < self.grid.height:
-                        self.pheromones[y, x] += deposit
+                    self.pheromones[y, x] += deposit
+
+        np.clip(self.pheromones, self.tau_min, self.tau_max, out=self.pheromones)
