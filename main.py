@@ -19,7 +19,7 @@ from src.optimization.ant_colony import AntColonyOptimization
 from src.visualization.plotter import PCBVisualizer
 from src.utils.helpers import save_results, calculate_metrics
 
-SCALE = 2000  # DEF units → grid
+SCALE = 500  # DEF units → grid
 
 
 class PCBRoutingOptimizer:

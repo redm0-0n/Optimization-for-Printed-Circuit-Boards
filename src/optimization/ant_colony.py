@@ -35,6 +35,7 @@ class AntColonyOptimization:
         self.evaporation_rate = evaporation_rate
         self.pheromone_deposit = pheromone_deposit
 
+        # Max-Min Ant System (MMAS) bounds to prevent stagnation
         self.tau_min = 0.01
         self.tau_max = 10.0
         self.pheromones = np.ones((grid.height, grid.width)) * 0.1
@@ -60,8 +61,9 @@ class AntColonyOptimization:
                     self.best_fitness = fitness
                     self.best_solution = copy.deepcopy(routes)
 
-            self.best_fitness_history.append(iter_best_fitness)
+            self.best_fitness_history.append(self.best_fitness)
 
+            # Update pheromones based ONLY on the iteration's best ant
             self._update_pheromones(iter_best_routes, iter_best_fitness)
 
         return self.best_solution
@@ -84,6 +86,8 @@ class AntColonyOptimization:
                 routes[net_name] = path
                 self.grid.update_usage(path, delta=1)
             else:
+                # NO FALLBACK! If the ant fails, it fails.
+                # This forces the colony to learn good pheromone paths.
                 routes[net_name] = []
 
         return routes
@@ -94,8 +98,10 @@ class AntColonyOptimization:
 
         while remaining:
             current = path[-1]
+            # Pick next pin based on pheromone attraction
             next_pin = min(remaining, key=lambda p: self._pheromone_distance(current, p))
 
+            # Route using our custom pheromone-aware A*
             segment = self._astar_with_pheromone(current, next_pin)
 
             if segment is None:
@@ -121,6 +127,7 @@ class AntColonyOptimization:
         return manhattan / (1 + avg_pheromone)
 
     def _astar_with_pheromone(self, start: Tuple[int, int], goal: Tuple[int, int]) -> Optional[List[Tuple[int, int]]]:
+        """Standalone A* loop that safely incorporates pheromones into the cost."""
         open_set = [(0, start)]
         came_from = {}
         g_score = {start: 0}
@@ -144,15 +151,13 @@ class AntColonyOptimization:
                 if (nx, ny) in visited:
                     continue
 
+                # Dynamic Cost: Base congestion - Pheromone attraction
                 cong_cost = self.grid.get_congestion_cost(nx, ny)
-
                 pheromone_bonus = self.pheromones[ny, nx] * self.beta
 
-                exploration_noise = random.uniform(0, 1) * self.alpha * 3.0
-
-                move_cost = 1.0 + 0.5 * cong_cost - pheromone_bonus + exploration_noise
+                move_cost = 1.0 + 0.5 * cong_cost - pheromone_bonus
                 if move_cost < 0.1:
-                    move_cost = 0.1
+                    move_cost = 0.1  # Prevent negative costs breaking the priority queue
 
                 tentative_g = g_score[current] + move_cost
 
@@ -170,6 +175,7 @@ class AntColonyOptimization:
         if not iter_best_routes:
             return
 
+        # Deposit strength based on fitness (higher is better, fitness is negative)
         deposit = abs(iter_best_fitness) / 1000 + 0.5
 
         for route in iter_best_routes.values():
@@ -177,4 +183,5 @@ class AntColonyOptimization:
                 for x, y in route:
                     self.pheromones[y, x] += deposit
 
+        # Max-Min bounds to prevent complete stagnation or infinite buildup
         np.clip(self.pheromones, self.tau_min, self.tau_max, out=self.pheromones)
