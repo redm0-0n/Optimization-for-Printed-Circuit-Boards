@@ -3,6 +3,9 @@ import Sidebar from "./components/Sidebar";
 import HomePage from "./pages/HomePage";
 import AnalysisView from "./pages/AnalysisView";
 import StatisticsView from "./pages/StatisticsView";
+import GAExplorerView from "./pages/GAExplorerView";
+import ACOExplorerView from "./pages/ACOExplorerView";
+import CompareWindow from "./CompareWindow"; // Импортируем как компонент
 import { api } from "./api/client";
 
 const POLL_INTERVAL = 3000;
@@ -22,8 +25,9 @@ export default function App() {
 
   const [pollingRunId, setPollingRunId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  /** Run whose results are currently shown on the canvas (for metrics / modal). */
   const [resultRun, setResultRun] = useState(null);
+
+  const [compareRunIds, setCompareRunIds] = useState([]);
 
   const loadBoards = useCallback(async () => {
     try {
@@ -65,18 +69,6 @@ export default function App() {
     return () => clearInterval(iv);
   }, [pollingRunId]);
 
-  const handleUploaded = (board) => {
-    loadBoards();
-    setSelectedBoardId(board.id);
-    setRoutes(null);
-    setMetrics(null);
-    setFitnessHistory([]);
-    setAlgoName(null);
-    setDuration(null);
-    setUsageData(null);
-    setResultRun(null);
-  };
-
   const handleRunStart = (run) => {
     setPollingRunId(run.id);
     setAlgoName(run.algorithm);
@@ -84,7 +76,6 @@ export default function App() {
     setMetrics(null);
     setFitnessHistory([]);
     setDuration(null);
-    setUsageData(null);
     setResultRun(run);
     setRefreshKey((k) => k + 1);
   };
@@ -98,82 +89,73 @@ export default function App() {
     setDuration(run.duration_seconds);
     setResultRun(run);
     setPollingRunId(null);
-
     setSelectedBoardId(run.board_id);
     if (!selectedBoard || selectedBoard.id !== run.board_id) {
       api.getBoard(run.board_id).then(setSelectedBoard).catch(() => {});
     }
   };
 
-  const handleDeleteBoard = async (id) => {
-    await api.deleteBoard(id);
-    loadBoards();
-    if (selectedBoardId === id) {
-      setSelectedBoardId(null);
-      setSelectedBoard(null);
-      setRoutes(null);
-      setMetrics(null);
-      setFitnessHistory([]);
-      setAlgoName(null);
-      setDuration(null);
-      setResultRun(null);
-    }
+  const handleCompare = (ids) => {
+    setCompareRunIds(ids);
+    setView("compare");
   };
 
   const headerSubtitle =
-    view === "home"
-      ? "Overview"
-      : view === "stats"
-        ? "Compare runs"
-        : "Interactive workspace";
+    view === "home" ? "Overview" :
+    view === "explorer" ? "GA Coefficient experiments" :
+    view === "aco-explorer" ? "ACO Strategy experiments" :
+    view === "stats" ? "Statistics & Run history" :
+    view === "compare" ? "Comparing selected runs" : "Interactive workspace";
 
   return (
-    <div className="flex h-screen">
-      <Sidebar active={view} onChange={setView} />
+    <div className="flex h-screen bg-pcb-bg text-pcb-text">
+      <Sidebar active={view === "compare" ? "stats" : view} onChange={setView} />
 
       <div className="ml-16 flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b border-pcb-border flex items-center px-5 shrink-0 bg-pcb-surface/30 backdrop-blur-sm">
           <div>
-            <h1 className="text-sm font-bold tracking-tight">
-              PCB Routing Optimizer
-            </h1>
+            <h1 className="text-sm font-bold tracking-tight">PCB Routing Optimizer</h1>
             <p className="text-[10px] text-pcb-muted">{headerSubtitle}</p>
           </div>
           <div className="flex-1" />
           {view === "analysis" && algoName && (
             <span className="text-[10px] font-mono text-pcb-accent bg-pcb-accent/10 px-2.5 py-1 rounded-md border border-pcb-accent/20">
               {algoName.toUpperCase()}
-              {pollingRunId && (
-                <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-pcb-copper animate-pulse" />
-              )}
+              {pollingRunId && <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-pcb-copper animate-pulse" />}
             </span>
           )}
         </header>
 
-        {view === "home" && <HomePage />}
-
-        {view === "analysis" && (
-          <AnalysisView
-            boards={boards}
-            selectedBoardId={selectedBoardId}
-            setSelectedBoardId={setSelectedBoardId}
-            selectedBoard={selectedBoard}
-            routes={routes}
-            metrics={metrics}
-            fitnessHistory={fitnessHistory}
-            algoName={algoName}
-            usageData={usageData}
-            duration={duration}
-            refreshKey={refreshKey}
-            onUploaded={handleUploaded}
-            onRunStart={handleRunStart}
-            onSelectRun={handleSelectRun}
-            onDeleteBoard={handleDeleteBoard}
-            resultRun={resultRun}
-          />
-        )}
-
-        {view === "stats" && <StatisticsView />}
+        <main className="flex-1 overflow-hidden flex flex-col">
+          {view === "home" && <HomePage />}
+          {view === "analysis" && (
+            <AnalysisView
+              boards={boards}
+              selectedBoardId={selectedBoardId}
+              setSelectedBoardId={setSelectedBoardId}
+              selectedBoard={selectedBoard}
+              routes={routes}
+              metrics={metrics}
+              fitnessHistory={fitnessHistory}
+              algoName={algoName}
+              duration={duration}
+              refreshKey={refreshKey}
+              onUploaded={loadBoards}
+              onRunStart={handleRunStart}
+              onSelectRun={handleSelectRun}
+              onDeleteBoard={loadBoards}
+              resultRun={resultRun}
+            />
+          )}
+          {view === "explorer" && <GAExplorerView />}
+          {view === "aco-explorer" && <ACOExplorerView />}
+          {view === "stats" && (
+            <StatisticsView onCompare={handleCompare} />
+          )}
+          {view === "compare" && (
+            <CompareWindow runIds={compareRunIds} onBack={() => setView("stats")} />
+          )}
+        </main>
       </div>
     </div>
   );

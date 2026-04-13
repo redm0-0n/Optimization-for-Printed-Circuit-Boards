@@ -1,8 +1,10 @@
-import { Cpu, Home, LineChart, Microscope } from "lucide-react";
+import { Cpu, Home, LineChart, Microscope, SlidersHorizontal, Bug } from "lucide-react";
 
 const items = [
   { id: "home", label: "Home", icon: Home },
   { id: "analysis", label: "Analysis", icon: Microscope },
+  { id: "explorer", label: "GA Explorer", icon: SlidersHorizontal },
+  { id: "aco-explorer", label: "ACO Explorer", icon: Bug }, // <--- Новая вкладка
   { id: "stats", label: "Statistics", icon: LineChart },
 ];
 

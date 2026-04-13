@@ -50,14 +50,32 @@ function ParamsColumn({ run }) {
   );
 }
 
-export default function StatisticsView() {
+export default function StatisticsView({ onCompare }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [compareError, setCompareError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalRun, setModalRun] = useState(null);
+
+
+  const openCompareInternal = () => {
+    const byId = new Map(runs.map((r) => [r.id, r]));
+    const ordered = [];
+    for (const id of selectedIds) {
+      const r = byId.get(id);
+      if (r?.status === "completed" && r.result?.metrics) ordered.push(String(r.id));
+    }
+    
+    if (ordered.length < 2) {
+      setCompareError("Select at least two completed runs with metrics.");
+      return;
+    }
+    
+    setCompareError(null);
+    onCompare(ordered);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,13 +162,13 @@ export default function StatisticsView() {
         </button>
         <button
           type="button"
-          onClick={openCompareWindow}
+          onClick={openCompareInternal}
           disabled={selectedIds.size < 2}
           className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg border border-pcb-accent/40
-            bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 transition-colors"
         >
           <GitCompare className="w-3.5 h-3.5" />
-          Compare (new window)
+          Compare
         </button>
       </div>
 
