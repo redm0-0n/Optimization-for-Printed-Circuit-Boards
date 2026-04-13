@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Trash2, Eye, Clock, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Trash2, Eye, Clock, Loader2, AlertCircle, CheckCircle2, TableProperties } from "lucide-react";
 import { api } from "../api/client";
 
 const STATUS_ICON = {
@@ -16,7 +16,7 @@ const STATUS_CLASS = {
   failed:   "text-pcb-danger",
 };
 
-export default function RunHistory({ onSelectRun, refreshTrigger }) {
+export default function RunHistory({ onSelectRun, onOpenRunDetails, refreshTrigger }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -86,10 +86,23 @@ export default function RunHistory({ onSelectRun, refreshTrigger }) {
                   </p>
                 </div>
 
+                {run.status === "completed" && onOpenRunDetails && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenRunDetails(run)}
+                    title="Metrics & parameters"
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-pcb-muted
+                      hover:text-pcb-copper hover:bg-pcb-copper/10 opacity-0 group-hover:opacity-100
+                      transition-all"
+                  >
+                    <TableProperties className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 {run.status === "completed" && (
                   <button
+                    type="button"
                     onClick={() => onSelectRun(run)}
-                    title="View results"
+                    title="View routes on canvas"
                     className="w-7 h-7 rounded-md flex items-center justify-center text-pcb-muted
                       hover:text-pcb-accent hover:bg-pcb-accent/10 opacity-0 group-hover:opacity-100
                       transition-all"

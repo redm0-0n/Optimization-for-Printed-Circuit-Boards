@@ -1,35 +1,7 @@
 import { useState } from "react";
 import { Play, Settings2 } from "lucide-react";
 import { api } from "../api/client.js";
-
-const PRESETS = {
-  baseline: {},
-  ga: {
-    population_size: { label: "Population Size", type: "number", default: 50, min: 10, max: 500 },
-    generations:     { label: "Generations",     type: "number", default: 100, min: 10, max: 1000 },
-    mutation_rate:   { label: "Mutation Rate",   type: "number", default: 0.1, min: 0, max: 1, step: 0.01 },
-    crossover_rate:  { label: "Crossover Rate",  type: "number", default: 0.8, min: 0, max: 1, step: 0.01 },
-  },
-  aco: {
-    num_ants:         { label: "Ants per Iteration", type: "number", default: 50,  min: 5, max: 200 },
-    iterations:       { label: "Iterations",         type: "number", default: 100, min: 10, max: 500 },
-    alpha:            { label: "Alpha (Pheromone)",   type: "number", default: 1.0, min: 0, max: 5, step: 0.1 },
-    beta:             { label: "Beta (Heuristic)",    type: "number", default: 2.0, min: 0, max: 5, step: 0.1 },
-    evaporation_rate: { label: "Evaporation Rate",    type: "number", default: 0.1, min: 0, max: 1, step: 0.01 },
-  },
-};
-
-const ALGO_LABELS = {
-  baseline: "A* Baseline",
-  ga:       "Genetic Algorithm",
-  aco:      "Ant Colony Optimization",
-};
-
-const ALGO_DESC = {
-  baseline: "Greedy A* with rip-up-and-reroute. Fast baseline for comparison.",
-  ga:       "Evolutionary search over net ordering and route mutations.",
-  aco:      "Pheromone-guided A* routing with iterative reinforcement.",
-};
+import { PRESETS, ALGO_LABELS, ALGO_DESC } from "../config/algorithmPresets";
 
 export default function AlgorithmConfig({ boardId, onRunStart }) {
   const [algo, setAlgo] = useState("baseline");
