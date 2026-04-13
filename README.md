@@ -18,9 +18,3 @@ An advanced research dashboard for visualizing and analyzing Printed Circuit Boa
 - **Visualization**: Recharts, HTML5 Canvas API
 - **Icons**: Lucide React
 - **Solver Connection**: REST API Client
-
-## 📦 Quick Start
-
-1. **Install dependencies**:
-   ```bash
-   npm install
