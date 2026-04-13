@@ -5,7 +5,8 @@ import AnalysisView from "./pages/AnalysisView";
 import StatisticsView from "./pages/StatisticsView";
 import GAExplorerView from "./pages/GAExplorerView";
 import ACOExplorerView from "./pages/ACOExplorerView";
-import CompareWindow from "./CompareWindow"; // Импортируем как компонент
+import CompareWindow from "./CompareWindow";
+import BoardsLibraryView from "./pages/BoardsLibraryView";
 import { api } from "./api/client";
 
 const POLL_INTERVAL = 3000;
@@ -100,6 +101,17 @@ export default function App() {
     setView("compare");
   };
 
+  const handleBoardChange = (id) => {
+    setSelectedBoardId(id);
+    setRoutes(null);
+    setMetrics(null);
+    setFitnessHistory([]);
+    setAlgoName(null);
+    setDuration(null);
+    setUsageData(null);
+    setResultRun(null);
+  };
+
   const headerSubtitle =
     view === "home" ? "Overview" :
     view === "explorer" ? "GA Coefficient experiments" :
@@ -128,12 +140,19 @@ export default function App() {
 
         <main className="flex-1 overflow-hidden flex flex-col">
           {view === "home" && <HomePage />}
+          {view === "boards" && (
+            <BoardsLibraryView 
+              boards={boards} 
+              onUploaded={loadBoards} 
+              onDeleteBoard={loadBoards} 
+            />
+          )}
           {view === "analysis" && (
             <AnalysisView
               boards={boards}
               selectedBoardId={selectedBoardId}
-              setSelectedBoardId={setSelectedBoardId}
               selectedBoard={selectedBoard}
+              onBoardChange={handleBoardChange}
               routes={routes}
               metrics={metrics}
               fitnessHistory={fitnessHistory}

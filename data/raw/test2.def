@@ -1,7 +1,7 @@
 VERSION 5.8 ;
 DIVIDERCHAR "/" ;
 BUSBITCHARS "[]" ;
-DESIGN clustered_safe_sample ;
+DESIGN clustered_v1 ;
 UNITS DISTANCE MICRONS 2000 ;
 
 DIEAREA ( 0 0 ) ( 100000 100000 ) ;

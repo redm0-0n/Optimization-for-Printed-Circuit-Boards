@@ -16,21 +16,24 @@ const STATUS_CLASS = {
   failed:   "text-pcb-danger",
 };
 
-export default function RunHistory({ onSelectRun, onOpenRunDetails, refreshTrigger }) {
+export default function RunHistory({ boardId, onSelectRun, onOpenRunDetails, refreshTrigger }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     try {
       const data = await api.listRuns();
-      setRuns(data);
+      if (boardId) {
+        setRuns(data.filter((r) => String(r.board_id) === String(boardId)));
+      } else {
+        setRuns([]);
+      }
     } catch {}
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [refreshTrigger]);
+  useEffect(() => { load(); }, [refreshTrigger, boardId]);
 
-  // Auto-poll while any run is running
   useEffect(() => {
     const hasRunning = runs.some((r) => r.status === "running" || r.status === "pending");
     if (!hasRunning) return;
@@ -48,10 +51,12 @@ export default function RunHistory({ onSelectRun, onOpenRunDetails, refreshTrigg
     aco:      "bg-pcb-copper/15 text-pcb-copper border-pcb-copper/30",
   };
 
+  if (!boardId) return null
+
   return (
     <div className="space-y-3">
       <h3 className="text-xs font-semibold text-pcb-muted uppercase tracking-wider">
-        Run History
+        Run History ({runs.length})
       </h3>
 
       {loading ? (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, Play, Square, RefreshCw, ChevronsRight, SlidersHorizontal } from "lucide-react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import FileUpload from "../components/FileUpload";
+import BoardSelector from "../components/BoardSelector";
 import { api } from "../api/client";
 
 const SWEEP_FIELDS = {
@@ -121,20 +121,14 @@ export default function ACOExplorerView() {
           <Bug className="w-4 h-4 text-pcb-copper" />
           <h2 className="text-sm font-semibold">ACO Explorer</h2>
         </div>
+        <BoardSelector 
+          boards={boards} 
+          selectedId={selectedBoardId} 
+          onChange={setSelectedBoardId} 
+        />
         <p className="text-xs text-pcb-muted leading-relaxed">
           Investigate algorithm behavior: compare pre-defined strategies or perform precise parameter sweeps.
         </p>
-
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-semibold text-pcb-muted uppercase tracking-wider">Board</label>
-            <button onClick={loadBoards} className="text-[10px] px-2 py-1 rounded border border-pcb-border text-pcb-muted hover:text-pcb-text transition-colors"><RefreshCw className="w-3 h-3 inline mr-1" />Refresh</button>
-          </div>
-          <select value={selectedBoardId || ""} onChange={(e) => setSelectedBoardId(e.target.value)} className="w-full rounded-lg border border-pcb-border bg-pcb-surface/50 text-xs px-3 py-2 mb-3 outline-none focus:border-pcb-copper/50">
-            {boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.grid_width}x{b.grid_height})</option>)}
-          </select>
-          <FileUpload onUploaded={(b) => { loadBoards(); setSelectedBoardId(b.id); }} />
-        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div><label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Ants</label><input type="number" value={ants} onChange={(e) => setAnts(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>
