@@ -49,7 +49,7 @@ export default function ACOParameterChart({ runs }) {
     return (
       <div className="rounded-xl border border-pcb-border bg-pcb-surface/20 p-6 text-center">
         <p className="text-xs text-pcb-muted italic">
-          Нет завершенных ACO-прогонов с метриками. Запустите ACO Explorer, чтобы накопить данные.
+          There are no completed ACO runs with metrics. Launch ACO Explorer to collect data.
         </p>
       </div>
     );
@@ -64,7 +64,7 @@ export default function ACOParameterChart({ runs }) {
     <div className="rounded-xl border border-pcb-border bg-pcb-surface/20 p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-pcb-muted uppercase tracking-wider">
-          Зависимость Fitness от параметров ACO
+          Fitness dependence on ACO parameters
         </h3>
         <select
           value={xAxisField}
@@ -94,7 +94,7 @@ export default function ACOParameterChart({ runs }) {
             name="Best Fitness"
             tick={{ fill: "#8b949e", fontSize: 9 }}
             width={52}
-            label={{ value: "Best Fitness (lower is better)", angle: -90, fill: "#8b949e", fontSize: 10, position: "insideLeft" }}
+            label={{ value: "Best Fitness", angle: -90, fill: "#8b949e", fontSize: 10, position: "insideLeft" }}
           />
           <ZAxis dataKey="duration" range={[40, 120]} /> {/* Размер точки зависит от времени */}
           <Tooltip

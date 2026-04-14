@@ -98,7 +98,7 @@ export default function GAParameterChart({ runs }) {
             name="Best Fitness"
             tick={{ fill: "#8b949e", fontSize: 9 }}
             width={52}
-            label={{ value: "Best Fitness (lower is better)", angle: -90, fill: "#8b949e", fontSize: 10, position: "insideLeft" }}
+            label={{ value: "Best Fitness", angle: -90, fill: "#8b949e", fontSize: 10, position: "insideLeft" }}
           />
           <ZAxis dataKey="duration" range={[40, 120]} /> 
           <Tooltip

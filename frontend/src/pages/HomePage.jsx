@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import RuntimeScatterChart from "../components/RuntimeScatterChart";
 import ACOParameterChart from "../components/ACOParameterChart";
 import GAParameterChart from "../components/GAParameterChart";
+import QualityScatterChart from "../components/QualityScatterChart"
 
 export default function HomePage() {
   const [health, setHealth] = useState({ ok: null, detail: null });
@@ -103,13 +104,23 @@ export default function HomePage() {
             <BarChart3 className="w-4 h-4" /> Runtime Complexity
           </h3>
           <p className="text-sm text-pcb-muted leading-relaxed">
-            Visualization of solver time relative to problem size (grid cells × nets). 
-            Higher complexity instances naturally demand more computational generations or ants.
+          Visualization of solver time and routing quality relative to problem size (grid cells × nets). 
+          Higher complexity instances naturally demand more computational time. 
+          The Penalty Score chart evaluates routing success based on a weighted cost function, 
+          where a lower score indicates a better physical layout. 
+          You can interactively adjust the significance of key parameters—Wire Length (signal delay), 
+          Congestion (crosstalk risk), Overflow (manufacturing shorts), 
+          and Fail Penalty (unrouted nets)—to observe how different optimization 
+          priorities highlight the strengths of baseline and metaheuristic algorithms.
           </p>
           {!runsLoaded ? (
             <p className="text-xs text-pcb-muted italic py-8 text-center">Loading complexity data…</p>
           ) : (
-            <RuntimeScatterChart runs={runs} boardById={boardById} />
+            <div className="space-y-5">
+                <RuntimeScatterChart runs={runs} boardById={boardById} />
+                
+                <QualityScatterChart runs={runs} boardById={boardById} />
+            </div>
           )}
         </section>
 
@@ -121,7 +132,7 @@ export default function HomePage() {
           </h3>
           <p className="text-sm text-pcb-muted leading-relaxed">
             Analysis of how pheromone importance (Alpha) and heuristic desirability (Beta) influence 
-            the colony's ability to find the shortest wire length without overlaps.
+            the colony's ability to find the shortest wire length without overlaps. The point size depends on the running time of the algorithm.
           </p>
           {!runsLoaded ? (
             <p className="text-xs text-pcb-muted italic py-8 text-center">Loading ACO analysis…</p>
@@ -138,7 +149,7 @@ export default function HomePage() {
           </h3>
           <p className="text-sm text-pcb-muted leading-relaxed">
             Evaluating the trade-off between exploration (Mutation Rate) and exploitation 
-            (Crossover Rate) in the population-based evolutionary search.
+            (Crossover Rate) in the population-based evolutionary search. The point size depends on the running time of the algorithm.
           </p>
           {!runsLoaded ? (
             <p className="text-xs text-pcb-muted italic py-8 text-center">Loading GA analysis…</p>

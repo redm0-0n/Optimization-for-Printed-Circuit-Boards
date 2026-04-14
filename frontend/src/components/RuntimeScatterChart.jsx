@@ -55,6 +55,11 @@ export default function RuntimeScatterChart({ runs, boardById }) {
 
   return (
     <div className="rounded-xl border border-pcb-border bg-pcb-surface/20 p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xs font-semibold text-pcb-muted uppercase tracking-wider">
+          Time dependence on complexity of problem for different methods
+        </h3>
+      </div>
       <ResponsiveContainer width="100%" height={280}>
         <ScatterChart margin={{ top: 12, right: 12, bottom: 28, left: 12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
