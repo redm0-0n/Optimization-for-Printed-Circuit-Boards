@@ -347,7 +347,7 @@ export default function GAExplorerView({ boards, selectedBoardId, setSelectedBoa
             </thead>
             <tbody className="font-mono tabular-nums">
               {runs.map((r) => {
-                const best = r.history.length ? Math.min(...r.history) : null;
+                const best = r.history.length ? Math.max(...r.history) : null;
                 return (
                   <tr key={r.key} className="border-b border-pcb-border/60 last:border-0 hover:bg-pcb-surface/30 transition-colors">
                     <td className="py-2.5 pr-3 text-pcb-text font-sans">{r.label}</td>
