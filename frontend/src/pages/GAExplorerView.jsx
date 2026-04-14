@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SlidersHorizontal, Play, Square, RefreshCw, ChevronsRight } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { SlidersHorizontal, Play, Square, ChevronsRight } from "lucide-react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import BoardSelector from "../components/BoardSelector";
+import SweepHistory from "../components/SweepHistory";
+import RunDetailModal from "../components/RunDetailModal";
 import { api } from "../api/client";
 
 const SWEEP_FIELDS = {
@@ -19,9 +21,16 @@ const SERIES_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#
 const POLL_DELAY_MS = 2500;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export default function GAExplorerView() {
-  const [boards, setBoards] = useState([]);
-  const [selectedBoardId, setSelectedBoardId] = useState(null);
+function buildSweepValues(min, max, step) {
+  const out = [];
+  const safeStep = step > 0 ? step : 0.01;
+  for (let v = min; v <= max + 1e-9; v += safeStep) {
+    out.push(Number(v.toFixed(6)));
+  }
+  return out;
+}
+
+export default function GAExplorerView({ boards, selectedBoardId, setSelectedBoardId }) {
   const [activeTab, setActiveTab] = useState("modes");
 
   const [popSize, setPopSize] = useState(50);
@@ -38,77 +47,166 @@ export default function GAExplorerView() {
   const [runs, setRuns] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalRun, setModalRun] = useState(null);
+
   const stopRef = useRef(false);
-
-  const loadBoards = useCallback(async () => {
-    try {
-      const data = await api.listBoards();
-      setBoards(data);
-      if (!selectedBoardId && data.length) setSelectedBoardId(data[0].id);
-    } catch {}
-  }, [selectedBoardId]);
-
-  useEffect(() => { loadBoards(); }, [loadBoards]);
+  const activeSweepIdRef = useRef(null);
+  const viewedSweepIdRef = useRef(null);
 
   const chartSeries = useMemo(() => runs.filter((r) => r.status === "completed" && r.history.length > 0), [runs]);
   const chartData = useMemo(() => {
     if (!chartSeries.length) return [];
-    const maxLen = Math.max(...chartSeries.map(s => s.history.length));
+    const maxLen = Math.max(...chartSeries.map((s) => s.history.length));
     const rows = [];
-    for (let i = 0; i < maxLen; i++) {
+    for (let i = 0; i < maxLen; i += 1) {
       const row = { iter: i + 1 };
-      chartSeries.forEach(s => { if (i < s.history.length) row[s.key] = s.history[i]; });
+      chartSeries.forEach((s) => { if (i < s.history.length) row[s.key] = s.history[i]; });
       rows.push(row);
     }
     return rows;
   }, [chartSeries]);
 
-  const executeRuns = async (runConfigs) => {
-    setError(null); setRuns([]); setRunning(true); stopRef.current = false;
+  const executeRuns = async (runConfigs, sweepTarget) => {
+    setError(null);
+    setRuns([]);
+    setRunning(true);
+    stopRef.current = false;
+
+    const currentSweepId = `sweep_${Date.now()}`;
+    activeSweepIdRef.current = currentSweepId;
+    viewedSweepIdRef.current = currentSweepId;
+
+    const updateViewIfActive = (updater) => {
+      if (viewedSweepIdRef.current === currentSweepId) {
+        setRuns(updater);
+      }
+    };
+
     for (const config of runConfigs) {
       if (stopRef.current) break;
-      setRuns(prev => [...prev, { key: config.key, label: config.label, runId: null, status: "starting", history: [], duration: null, metrics: null, error: null }]);
+      
+      updateViewIfActive(prev => [
+        ...prev, 
+        { key: config.key, label: config.label, runId: null, status: "starting", history: [], duration: null, metrics: null, error: null }
+      ]);
+
       try {
-        const params = { population_size: Number(popSize), generations: Number(gens), mutation_rate: config.mutation, crossover_rate: config.crossover };
+        const params = {
+          population_size: Number(popSize),
+          generations: Number(gens),
+          mutation_rate: config.mutation,
+          crossover_rate: config.crossover,
+          sweep_id: currentSweepId,
+          sweep_target: sweepTarget
+        };
+
         const run = await api.startRun(selectedBoardId, "ga", params);
-        setRuns(prev => prev.map(r => r.key === config.key ? { ...r, runId: run.id, status: "running" } : r));
+        
+        updateViewIfActive(prev => prev.map(r => r.key === config.key ? { ...r, runId: run.id, status: "running" } : r));
+
         let finalRun = null;
         while (!stopRef.current) {
           finalRun = await api.getRun(run.id);
           if (finalRun.status === "completed" || finalRun.status === "failed") break;
           await sleep(POLL_DELAY_MS);
         }
-        if (!finalRun) break;
+
+        if (!finalRun) {
+          updateViewIfActive((prev) => prev.map((r) => (r.key === config.key ? { ...r, status: "stopped" } : r)));
+          break;
+        }
+
         const completed = finalRun.status === "completed";
-        setRuns(prev => prev.map(r => r.key !== config.key ? r : { 
-          ...r, status: completed ? "completed" : "failed", 
-          history: completed ? (finalRun.result.fitness_history || []) : [], 
-          duration: finalRun.duration_seconds, 
+        updateViewIfActive(prev => prev.map(r => r.key !== config.key ? r : {
+          ...r,
+          status: completed ? "completed" : "failed",
+          history: completed ? (finalRun.result.fitness_history || []) : [],
+          duration: finalRun.duration_seconds,
           metrics: completed ? finalRun.result.metrics : null,
           error: finalRun.error_message || null
         }));
       } catch (e) {
-        setRuns(prev => prev.map(r => r.key === config.key ? { ...r, status: "failed", error: e.message } : r));
+        updateViewIfActive(prev => prev.map(r => r.key === config.key ? { ...r, status: "failed", error: e.message } : r));
       }
     }
-    setRunning(false);
+    
+    if (activeSweepIdRef.current === currentSweepId) {
+      setRunning(false);
+      activeSweepIdRef.current = null;
+    }
   };
 
   const startModeComparison = () => {
     if (!selectedBoardId || running) return;
-    executeRuns(Object.entries(GA_MODES).map(([key, mode]) => ({ key, label: mode.label, mutation: mode.mutation, crossover: mode.crossover })));
+    const configs = Object.entries(GA_MODES).map(([key, mode]) => ({
+      key,
+      label: mode.label,
+      mutation: mode.mutation,
+      crossover: mode.crossover
+    }));
+    executeRuns(configs, "modes");
   };
 
   const startSweep = () => {
     if (!selectedBoardId || running) return;
     const min = Number(sweepMin), max = Number(sweepMax), step = Number(sweepStep);
     if (min >= max || step <= 0) { setError("Range invalid: ensure End > Start and Step > 0."); return; }
-    const vals = []; for (let v = min; v <= max + 0.0001; v += step) vals.push(Number(v.toFixed(4)));
-    executeRuns(vals.map(v => ({
-      key: `v_${v}`, label: `${sweepField}=${v}`,
+
+    const vals = buildSweepValues(min, max, step);
+    const configs = vals.map(v => ({
+      key: `v_${v}`,
+      label: `${sweepField}=${v}`,
       mutation: sweepField === 'mutation_rate' ? v : Number(fixedMutation),
       crossover: sweepField === 'crossover_rate' ? v : Number(fixedCrossover),
-    })));
+    }));
+
+    executeRuns(configs, sweepField);
+  };
+
+  const handleSelectPastSweep = (session) => {
+    viewedSweepIdRef.current = session.id;
+
+    if (session.target_field === "modes") {
+      setActiveTab("modes");
+    } else {
+      setActiveTab("sweep");
+      setSweepField(session.target_field);
+    }
+
+    const loadedRuns = session.runs.map(run => {
+      let label = "Past Run";
+      let coeffVal = "?";
+
+      if (session.target_field === "modes") {
+        const mVal = run.parameters?.mutation_rate;
+        const cVal = run.parameters?.crossover_rate;
+        const modeEntry = Object.entries(GA_MODES).find(([, v]) => v.mutation === mVal && v.crossover === cVal);
+        label = modeEntry ? modeEntry[1].label : `Mut: ${mVal} | Cross: ${cVal}`;
+        coeffVal = modeEntry ? modeEntry[0] : "custom";
+      } else {
+        coeffVal = run.parameters?.[session.target_field];
+        label = `${session.target_field}=${coeffVal}`;
+      }
+
+      return {
+        key: `past_${run.id}`,
+        label: label,
+        coeffValue: coeffVal,
+        runId: run.id,
+        status: run.status,
+        history: run.result?.fitness_history || [],
+        duration: run.duration_seconds,
+        metrics: run.result?.metrics,
+        error: run.error_message || null,
+      };
+    });
+
+    if (session.target_field !== "modes") {
+      loadedRuns.sort((a, b) => Number(a.coeffValue) - Number(b.coeffValue));
+    }
+    setRuns(loadedRuns);
   };
 
   return (
@@ -118,18 +216,26 @@ export default function GAExplorerView() {
           <SlidersHorizontal className="w-4 h-4 text-pcb-accent" />
           <h2 className="text-sm font-semibold">GA Explorer</h2>
         </div>
+        
         <BoardSelector 
           boards={boards} 
           selectedId={selectedBoardId} 
           onChange={setSelectedBoardId} 
         />
+        
         <p className="text-xs text-pcb-muted leading-relaxed">
           Investigate algorithm behavior: compare pre-defined strategies or perform precise parameter sweeps.
         </p>
 
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Population</label><input type="number" value={popSize} onChange={e => setPopSize(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-accent/50" /></div>
-          <div><label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Iterations</label><input type="number" value={gens} onChange={e => setGens(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-accent/50" /></div>
+          <div>
+            <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Population</label>
+            <input type="number" value={popSize} onChange={e => setPopSize(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-accent/50" />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Iterations</label>
+            <input type="number" value={gens} onChange={e => setGens(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-accent/50" />
+          </div>
         </div>
 
         <div className="flex p-1 bg-pcb-surface border border-pcb-border rounded-lg">
@@ -148,7 +254,9 @@ export default function GAExplorerView() {
                   </div>
                 ))}
               </div>
-              <button onClick={startModeComparison} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-accent/40 bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 transition-colors"><ChevronsRight className="w-3.5 h-3.5 inline mr-1.5" /> Run Comparison</button>
+              <button onClick={startModeComparison} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-accent/40 bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 transition-colors">
+                <ChevronsRight className="w-3.5 h-3.5 inline mr-1.5" /> Run Comparison
+              </button>
             </div>
           ) : (
             <div className="flex-1 flex flex-col justify-between">
@@ -160,32 +268,52 @@ export default function GAExplorerView() {
                   </select>
                 </div>
                 <div className="grid grid-cols-3 gap-2 py-3 border-y border-pcb-border/40">
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Start</label><input type="number" step="0.01" value={sweepMin} onChange={e => setSweepMin(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" /></div>
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">End</label><input type="number" step="0.01" value={sweepMax} onChange={e => setSweepMax(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" /></div>
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Step</label><input type="number" step="0.01" value={sweepStep} onChange={e => setSweepStep(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" /></div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Start</label>
+                    <input type="number" step="0.01" value={sweepMin} onChange={e => setSweepMin(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">End</label>
+                    <input type="number" step="0.01" value={sweepMax} onChange={e => setSweepMax(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Step</label>
+                    <input type="number" step="0.01" value={sweepStep} onChange={e => setSweepStep(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-accent/50" />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider block">Constants</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {sweepField !== 'mutation_rate' && <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Mutation</label><input type="number" value={fixedMutation} onChange={e => setFixedMutation(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-accent/50" /></div>}
-                    {sweepField !== 'crossover_rate' && <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Crossover</label><input type="number" value={fixedCrossover} onChange={e => setFixedCrossover(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-accent/50" /></div>}
+                    {sweepField !== 'mutation_rate' && (
+                      <div>
+                        <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Mutation</label>
+                        <input type="number" value={fixedMutation} onChange={e => setFixedMutation(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-accent/50" />
+                      </div>
+                    )}
+                    {sweepField !== 'crossover_rate' && (
+                      <div>
+                        <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Crossover</label>
+                        <input type="number" value={fixedCrossover} onChange={e => setFixedCrossover(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-accent/50" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-              <button onClick={startSweep} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-accent/40 bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 transition-colors"><Play className="w-3.5 h-3.5 inline mr-1.5" /> Start Sweep</button>
+              <button onClick={startSweep} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-accent/40 bg-pcb-accent/10 text-pcb-accent hover:bg-pcb-accent/20 disabled:opacity-40 transition-colors">
+                <Play className="w-3.5 h-3.5 inline mr-1.5" /> Start Sweep
+              </button>
             </div>
           )}
           
           {error && <p className="text-[10px] text-pcb-danger bg-pcb-danger/10 p-2 rounded-md mt-2 border border-pcb-danger/20">{error}</p>}
           
           <button 
-            onClick={() => { stopRef.current = true; setRunning(false); }} 
+            onClick={() => { stopRef.current = true; setRunning(false); activeSweepIdRef.current = null; }} 
             disabled={!running}
             className={`w-full py-2 mt-2 rounded-lg text-xs font-medium border transition-colors border-pcb-border text-pcb-danger hover:bg-pcb-danger/5`}
           >
             <Square className="w-3.5 h-3.5 inline mr-1.5" /> Stop Execution
           </button>
-
         </div>
       </div>
 
@@ -224,7 +352,9 @@ export default function GAExplorerView() {
                   <tr key={r.key} className="border-b border-pcb-border/60 last:border-0 hover:bg-pcb-surface/30 transition-colors">
                     <td className="py-2.5 pr-3 text-pcb-text font-sans">{r.label}</td>
                     <td className="py-2.5 pr-3 font-sans text-pcb-muted">{r.status}</td>
-                    <td className="py-2.5 pr-3">{r.runId ? String(r.runId).slice(0, 8) : "—"}</td>
+                    <td className="py-2.5 pr-3 cursor-pointer hover:text-pcb-accent" onClick={() => { setModalRun({id: r.runId, algorithm: "ga"}); setModalOpen(true); }}>
+                      {r.runId ? String(r.runId).slice(0, 8) : "—"}
+                    </td>
                     <td className="py-2.5 pr-3 text-right text-pcb-muted">{r.duration != null ? r.duration.toFixed(2) : "—"}</td>
                     <td className="py-2.5 pr-3 text-right text-pcb-accent">{best != null ? best.toFixed(2) : "—"}</td>
                     <td className="py-2.5 text-right">{r.metrics?.success_rate != null ? `${(r.metrics.success_rate * 100).toFixed(1)}%` : "—"}</td>
@@ -235,6 +365,17 @@ export default function GAExplorerView() {
           </table>
         </div>
       </div>
+
+      <div className="w-[22rem] border-l border-pcb-border bg-pcb-surface/20 overflow-y-auto shrink-0 p-4">
+        <SweepHistory
+          boardId={selectedBoardId}
+          algorithm="ga"
+          onSelectSweep={handleSelectPastSweep}
+          refreshTrigger={running}
+        />
+      </div>
+
+      <RunDetailModal open={modalOpen} onClose={() => { setModalOpen(false); setModalRun(null); }} run={modalRun} />
     </div>
   );
 }

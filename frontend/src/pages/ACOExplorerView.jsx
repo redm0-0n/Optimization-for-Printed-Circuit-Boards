@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bug, Play, Square, RefreshCw, ChevronsRight, SlidersHorizontal } from "lucide-react";
+import { Bug, Play, Square, ChevronsRight, SlidersHorizontal } from "lucide-react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import BoardSelector from "../components/BoardSelector";
+import SweepHistory from "../components/SweepHistory";
+import RunDetailModal from "../components/RunDetailModal";
 import { api } from "../api/client";
 
 const SWEEP_FIELDS = {
@@ -20,9 +22,7 @@ const SERIES_COLORS = ["#d29922", "#3fb950", "#58a6ff", "#f85149", "#a371f7", "#
 const POLL_DELAY_MS = 2500;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export default function ACOExplorerView() {
-  const [boards, setBoards] = useState([]);
-  const [selectedBoardId, setSelectedBoardId] = useState(null);
+export default function ACOExplorerView({ boards, selectedBoardId, setSelectedBoardId }) {
   const [activeTab, setActiveTab] = useState("modes");
 
   const [ants, setAnts] = useState(50);
@@ -40,17 +40,14 @@ export default function ACOExplorerView() {
   const [runs, setRuns] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalRun, setModalRun] = useState(null);
+
   const stopRef = useRef(false);
-
-  const loadBoards = useCallback(async () => {
-    try {
-      const data = await api.listBoards();
-      setBoards(data);
-      if (!selectedBoardId && data.length) setSelectedBoardId(data[0].id);
-    } catch {}
-  }, [selectedBoardId]);
-
-  useEffect(() => { loadBoards(); }, [loadBoards]);
+  
+  const activeSweepIdRef = useRef(null);
+  const viewedSweepIdRef = useRef(null);
 
   const chartSeries = useMemo(() => runs.filter((r) => r.status === "completed" && r.history.length > 0), [runs]);
   const chartData = useMemo(() => {
@@ -65,53 +62,156 @@ export default function ACOExplorerView() {
     return rows;
   }, [chartSeries]);
 
-  const executeRuns = async (runConfigs) => {
-    setError(null); setRuns([]); setRunning(true); stopRef.current = false;
+  const executeRuns = async (runConfigs, sweepTarget) => {
+    setError(null); 
+    setRuns([]); 
+    setRunning(true); 
+    stopRef.current = false;
+
+    const currentSweepId = `sweep_${Date.now()}`;
+    activeSweepIdRef.current = currentSweepId;
+    viewedSweepIdRef.current = currentSweepId;
+
+    const updateViewIfActive = (updater) => {
+      if (viewedSweepIdRef.current === currentSweepId) {
+        setRuns(updater);
+      }
+    };
+
     for (const config of runConfigs) {
       if (stopRef.current) break;
-      setRuns((prev) => [...prev, { key: config.key, label: config.label, runId: null, status: "starting", history: [], duration: null, metrics: null, error: null }]);
+      
+      updateViewIfActive((prev) => [
+        ...prev, 
+        { key: config.key, label: config.label, runId: null, status: "starting", history: [], duration: null, metrics: null, error: null }
+      ]);
+      
       try {
-        const params = { num_ants: Number(ants), iterations: Number(iterations), alpha: config.alpha, beta: config.beta, evaporation_rate: config.evaporation_rate };
+        const params = { 
+          num_ants: Number(ants), 
+          iterations: Number(iterations), 
+          alpha: config.alpha, 
+          beta: config.beta, 
+          evaporation_rate: config.evaporation_rate,
+          sweep_id: currentSweepId,
+          sweep_target: sweepTarget
+        };
+        
         const run = await api.startRun(selectedBoardId, "aco", params);
-        setRuns((prev) => prev.map((r) => (r.key === config.key ? { ...r, runId: run.id, status: "running" } : r)));
+        
+        updateViewIfActive((prev) => 
+          prev.map((r) => (r.key === config.key ? { ...r, runId: run.id, status: "running" } : r))
+        );
+        
         let finalRun = null;
         while (!stopRef.current) {
           finalRun = await api.getRun(run.id);
           if (finalRun.status === "completed" || finalRun.status === "failed") break;
           await sleep(POLL_DELAY_MS);
         }
-        if (!finalRun) break;
+        
+        if (!finalRun) {
+          updateViewIfActive((prev) => prev.map((r) => (r.key === config.key ? { ...r, status: "stopped" } : r)));
+          break;
+        }
+        
         const completed = finalRun.status === "completed";
-        setRuns((prev) => prev.map((r) => r.key !== config.key ? r : { 
-          ...r, status: completed ? "completed" : "failed", 
+        updateViewIfActive((prev) => prev.map((r) => r.key !== config.key ? r : { 
+          ...r, 
+          status: completed ? "completed" : "failed", 
           history: completed ? (finalRun.result.fitness_history || []) : [], 
           duration: finalRun.duration_seconds ?? null, 
           metrics: completed ? finalRun.result.metrics : null, 
           error: finalRun.error_message || null 
         }));
       } catch (e) {
-        setRuns((prev) => prev.map((r) => r.key === config.key ? { ...r, status: "failed", error: e.message } : r));
+        updateViewIfActive((prev) => prev.map((r) => r.key === config.key ? { ...r, status: "failed", error: e.message } : r));
       }
     }
-    setRunning(false);
+    
+    if (activeSweepIdRef.current === currentSweepId) {
+      setRunning(false);
+      activeSweepIdRef.current = null;
+    }
   };
 
   const startModeComparison = () => {
     if (!selectedBoardId || running) return;
-    executeRuns(Object.entries(ACO_MODES).map(([key, mode]) => ({ key, label: mode.label, alpha: mode.alpha, beta: mode.beta, evaporation_rate: mode.evaporation_rate })));
+    const configs = Object.entries(ACO_MODES).map(([key, mode]) => ({ 
+      key, 
+      label: mode.label, 
+      alpha: mode.alpha, 
+      beta: mode.beta, 
+      evaporation_rate: mode.evaporation_rate 
+    }));
+    executeRuns(configs, "modes");
   };
 
   const startSweep = () => {
     if (!selectedBoardId || running) return;
     const min = Number(sweepMin), max = Number(sweepMax), step = Number(sweepStep);
-    if (min >= max || step <= 0) { setError("Range invalid: ensure End > Start and Step > 0."); return; }
-    const vals = []; for (let v = min; v <= max + 0.0001; v += step) vals.push(Number(v.toFixed(4)));
-    executeRuns(vals.map(val => ({
-      key: `${sweepField}_${val}`, label: `${sweepField}=${val}`,
+    if (min >= max || step <= 0) { 
+      setError("Range invalid: ensure End > Start and Step > 0."); 
+      return; 
+    }
+    
+    const vals = []; 
+    for (let v = min; v <= max + 0.0001; v += step) vals.push(Number(v.toFixed(4)));
+    
+    const configs = vals.map(val => ({
+      key: `${sweepField}_${val}`, 
+      label: `${sweepField}=${val}`,
       alpha: sweepField === "alpha" ? val : Number(fixedAlpha),
       beta: sweepField === "beta" ? val : Number(fixedBeta),
       evaporation_rate: sweepField === "evaporation_rate" ? val : Number(fixedEvap),
-    })));
+    }));
+    
+    executeRuns(configs, sweepField);
+  };
+
+  const handleSelectPastSweep = (session) => {
+    viewedSweepIdRef.current = session.id; 
+    
+    if (session.target_field === "modes") {
+      setActiveTab("modes");
+    } else {
+      setActiveTab("sweep");
+      setSweepField(session.target_field);
+    }
+
+    const loadedRuns = session.runs.map(run => {
+      let label = "Past Run";
+      let coeffVal = "?";
+      
+      if (session.target_field === "modes") {
+         const aVal = run.parameters?.alpha;
+         const bVal = run.parameters?.beta;
+         const eVal = run.parameters?.evaporation_rate;
+         const modeEntry = Object.entries(ACO_MODES).find(([, v]) => v.alpha === aVal && v.beta === bVal && v.evaporation_rate === eVal);
+         label = modeEntry ? modeEntry[1].label : `α:${aVal}|β:${bVal}|e:${eVal}`;
+         coeffVal = modeEntry ? modeEntry[0] : "custom";
+      } else {
+         coeffVal = run.parameters?.[session.target_field];
+         label = `${session.target_field}=${coeffVal}`;
+      }
+
+      return {
+        key: `past_${run.id}`,
+        label: label,
+        coeffValue: coeffVal,
+        runId: run.id,
+        status: run.status,
+        history: run.result?.fitness_history || [],
+        duration: run.duration_seconds,
+        metrics: run.result?.metrics,
+        error: run.error_message || null,
+      };
+    });
+
+    if (session.target_field !== "modes") {
+      loadedRuns.sort((a, b) => Number(a.coeffValue) - Number(b.coeffValue));
+    }
+    setRuns(loadedRuns);
   };
 
   return (
@@ -121,18 +221,26 @@ export default function ACOExplorerView() {
           <Bug className="w-4 h-4 text-pcb-copper" />
           <h2 className="text-sm font-semibold">ACO Explorer</h2>
         </div>
+        
         <BoardSelector 
           boards={boards} 
           selectedId={selectedBoardId} 
           onChange={setSelectedBoardId} 
         />
+        
         <p className="text-xs text-pcb-muted leading-relaxed">
           Investigate algorithm behavior: compare pre-defined strategies or perform precise parameter sweeps.
         </p>
 
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Ants</label><input type="number" value={ants} onChange={(e) => setAnts(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>
-          <div><label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Iterations</label><input type="number" value={iterations} onChange={(e) => setIterations(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>
+          <div>
+            <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Ants</label>
+            <input type="number" value={ants} onChange={(e) => setAnts(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-copper/50" />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider mb-1 block">Iterations</label>
+            <input type="number" value={iterations} onChange={(e) => setIterations(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 outline-none focus:border-pcb-copper/50" />
+          </div>
         </div>
 
         <div className="flex p-1 bg-pcb-surface border border-pcb-border rounded-lg">
@@ -151,7 +259,9 @@ export default function ACOExplorerView() {
                   </div>
                 ))}
               </div>
-              <button onClick={startModeComparison} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-copper/40 bg-pcb-copper/10 text-pcb-copper hover:bg-pcb-copper/20 disabled:opacity-40 transition-colors"><ChevronsRight className="w-3.5 h-3.5 inline mr-1.5" /> Run Comparison</button>
+              <button onClick={startModeComparison} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-copper/40 bg-pcb-copper/10 text-pcb-copper hover:bg-pcb-copper/20 disabled:opacity-40 transition-colors">
+                <ChevronsRight className="w-3.5 h-3.5 inline mr-1.5" /> Run Comparison
+              </button>
             </div>
           ) : (
             <div className="flex-1 flex flex-col justify-between">
@@ -162,50 +272,89 @@ export default function ACOExplorerView() {
                     {Object.entries(SWEEP_FIELDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
+                
                 <div className="grid grid-cols-3 gap-2 py-3 border-y border-pcb-border/40">
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Start</label><input type="number" step="0.1" value={sweepMin} onChange={(e) => setSweepMin(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" /></div>
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">End</label><input type="number" step="0.1" value={sweepMax} onChange={(e) => setSweepMax(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" /></div>
-                  <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Step</label><input type="number" step="0.1" value={sweepStep} onChange={(e) => setSweepStep(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" /></div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Start</label>
+                    <input type="number" step="0.1" value={sweepMin} onChange={(e) => setSweepMin(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">End</label>
+                    <input type="number" step="0.1" value={sweepMax} onChange={(e) => setSweepMax(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Step</label>
+                    <input type="number" step="0.1" value={sweepStep} onChange={(e) => setSweepStep(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-xs px-2 py-1.5 font-mono outline-none focus:border-pcb-copper/50" />
+                  </div>
                 </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-semibold text-pcb-muted uppercase tracking-wider block">Constants</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {sweepField !== 'alpha' && <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Alpha</label><input type="number" value={fixedAlpha} onChange={(e) => setFixedAlpha(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>}
-                    {sweepField !== 'beta' && <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Beta</label><input type="number" value={fixedBeta} onChange={(e) => setFixedBeta(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>}
-                    {sweepField !== 'evaporation_rate' && <div><label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Evap</label><input type="number" value={fixedEvap} onChange={(e) => setFixedEvap(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" /></div>}
+                    {sweepField !== 'alpha' && (
+                      <div>
+                        <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Alpha</label>
+                        <input type="number" value={fixedAlpha} onChange={(e) => setFixedAlpha(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" />
+                      </div>
+                    )}
+                    {sweepField !== 'beta' && (
+                      <div>
+                        <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Beta</label>
+                        <input type="number" value={fixedBeta} onChange={(e) => setFixedBeta(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" />
+                      </div>
+                    )}
+                    {sweepField !== 'evaporation_rate' && (
+                      <div>
+                        <label className="text-[9px] font-semibold text-pcb-muted uppercase mb-1 block">Evap</label>
+                        <input type="number" value={fixedEvap} onChange={(e) => setFixedEvap(e.target.value)} className="w-full rounded-md bg-pcb-bg border border-pcb-border text-[11px] px-2 py-1.5 outline-none focus:border-pcb-copper/50" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-              <button onClick={startSweep} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-copper/40 bg-pcb-copper/10 text-pcb-copper hover:bg-pcb-copper/20 disabled:opacity-40 transition-colors"><Play className="w-3.5 h-3.5 inline mr-1.5" /> Start Sweep</button>
+              <button onClick={startSweep} disabled={running || !selectedBoardId} className="w-full py-2.5 mt-4 rounded-lg text-xs font-semibold border border-pcb-copper/40 bg-pcb-copper/10 text-pcb-copper hover:bg-pcb-copper/20 disabled:opacity-40 transition-colors">
+                <Play className="w-3.5 h-3.5 inline mr-1.5" /> Start Sweep
+              </button>
             </div>
           )}
           
-          {error && <p className="text-[10px] text-pcb-danger bg-pcb-danger/10 p-2 rounded-md mt-2 border border-pcb-danger/20">{error}</p>}
+          {error && (
+            <p className="text-[10px] text-pcb-danger bg-pcb-danger/10 p-2 rounded-md mt-2 border border-pcb-danger/20">
+              {error}
+            </p>
+          )}
           
           <button 
-            onClick={() => { stopRef.current = true; setRunning(false); }} 
+            onClick={() => { stopRef.current = true; setRunning(false); activeSweepIdRef.current = null; }} 
             disabled={!running}
             className={`w-full py-2 mt-2 rounded-lg text-xs font-medium border transition-colors border-pcb-border text-pcb-danger hover:bg-pcb-danger/5`}
           >
             <Square className="w-3.5 h-3.5 inline mr-1.5" /> Stop Execution
           </button>
-
         </div>
       </div>
 
       <div className="flex-1 min-w-0 bg-pcb-bg p-5 overflow-y-auto space-y-5">
         <div className="rounded-xl border border-pcb-border bg-pcb-surface/20 p-4">
-          <h3 className="text-xs font-semibold text-pcb-muted uppercase tracking-wider mb-4 flex items-center gap-2"><SlidersHorizontal className="w-3.5 h-3.5" /> Fitness Curves</h3>
+          <h3 className="text-xs font-semibold text-pcb-muted uppercase tracking-wider mb-4 flex items-center gap-2">
+            <SlidersHorizontal className="w-3.5 h-3.5" /> Fitness Curves
+          </h3>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={340}>
               <LineChart data={chartData} margin={{ top: 8, right: 20, left: 0, bottom: 6 }}>
                 <CartesianGrid stroke="#30363d" strokeDasharray="3 3" />
-                <XAxis dataKey="iter" tick={{fill: "#8b949e", fontSize: 10}} /><YAxis tick={{fill: "#8b949e", fontSize: 10}} width={48} />
-                <Tooltip cursor={{stroke: "#484f58"}} contentStyle={{background: '#161b22', border: '1px solid #30363d', borderRadius: 8, fontSize: 11}} /><Legend wrapperStyle={{fontSize: 11}} />
-                {chartSeries.map((s, idx) => <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={SERIES_COLORS[idx % SERIES_COLORS.length]} dot={false} strokeWidth={2} connectNulls />)}
+                <XAxis dataKey="iter" tick={{fill: "#8b949e", fontSize: 10}} />
+                <YAxis tick={{fill: "#8b949e", fontSize: 10}} width={48} />
+                <Tooltip cursor={{stroke: "#484f58"}} contentStyle={{background: '#161b22', border: '1px solid #30363d', borderRadius: 8, fontSize: 11}} />
+                <Legend wrapperStyle={{fontSize: 11}} />
+                {chartSeries.map((s, idx) => (
+                  <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={SERIES_COLORS[idx % SERIES_COLORS.length]} dot={false} strokeWidth={2} connectNulls />
+                ))}
               </LineChart>
             </ResponsiveContainer>
-          ) : <p className="text-xs text-pcb-muted italic py-10 text-center">Run modes or sweep to see results.</p>}
+          ) : (
+            <p className="text-xs text-pcb-muted italic py-10 text-center">Run modes or sweep to see results.</p>
+          )}
         </div>
 
         <div className="rounded-xl border border-pcb-border bg-pcb-surface/20 p-4 overflow-x-auto">
@@ -228,7 +377,9 @@ export default function ACOExplorerView() {
                   <tr key={r.key} className="border-b border-pcb-border/60 last:border-0 hover:bg-pcb-surface/30 transition-colors">
                     <td className="py-2.5 pr-3 text-pcb-text font-sans">{r.label}</td>
                     <td className="py-2.5 pr-3 font-sans text-pcb-muted">{r.status}</td>
-                    <td className="py-2.5 pr-3">{r.runId ? String(r.runId).slice(0, 8) : "—"}</td>
+                    <td className="py-2.5 pr-3 cursor-pointer hover:text-pcb-copper" onClick={() => { setModalRun({id: r.runId, algorithm: "aco"}); setModalOpen(true); }}>
+                      {r.runId ? String(r.runId).slice(0, 8) : "—"}
+                    </td>
                     <td className="py-2.5 pr-3 text-right text-pcb-muted">{r.duration != null ? r.duration.toFixed(2) : "—"}</td>
                     <td className="py-2.5 pr-3 text-right text-pcb-copper">{best != null ? best.toFixed(2) : "—"}</td>
                     <td className="py-2.5 text-right">{r.metrics?.success_rate != null ? `${(r.metrics.success_rate * 100).toFixed(1)}%` : "—"}</td>
@@ -239,6 +390,17 @@ export default function ACOExplorerView() {
           </table>
         </div>
       </div>
+
+      <div className="w-[22rem] border-l border-pcb-border bg-pcb-surface/20 overflow-y-auto shrink-0 p-4">
+        <SweepHistory
+          boardId={selectedBoardId}
+          algorithm="aco"
+          onSelectSweep={handleSelectPastSweep}
+          refreshTrigger={running}
+        />
+      </div>
+
+      <RunDetailModal open={modalOpen} onClose={() => { setModalOpen(false); setModalRun(null); }} run={modalRun} />
     </div>
   );
 }

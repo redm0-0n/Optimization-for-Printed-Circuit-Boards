@@ -46,6 +46,18 @@ export default function App() {
       .catch(() => setSelectedBoard(null));
   }, [selectedBoardId]);
 
+  const handleDeleteBoard = async (id) => {
+    try {
+      await api.deleteBoard(id);
+      await loadBoards();
+      if (selectedBoardId === id) {
+        handleBoardChange(null);
+      }
+    } catch (e) {
+      console.error("Failed to delete board:", e);
+    }
+  };
+
   useEffect(() => {
     if (!pollingRunId) return;
     const iv = setInterval(async () => {
@@ -144,7 +156,7 @@ export default function App() {
             <BoardsLibraryView 
               boards={boards} 
               onUploaded={loadBoards} 
-              onDeleteBoard={loadBoards} 
+              onDeleteBoard={handleDeleteBoard} 
             />
           )}
           {view === "analysis" && (
@@ -162,12 +174,24 @@ export default function App() {
               onUploaded={loadBoards}
               onRunStart={handleRunStart}
               onSelectRun={handleSelectRun}
-              onDeleteBoard={loadBoards}
+              onDeleteBoard={handleDeleteBoard}
               resultRun={resultRun}
             />
           )}
-          {view === "explorer" && <GAExplorerView />}
-          {view === "aco-explorer" && <ACOExplorerView />}
+          {view === "explorer" && (
+            <GAExplorerView 
+              boards={boards} 
+              selectedBoardId={selectedBoardId}
+              setSelectedBoardId={handleBoardChange} 
+            />
+          )}
+          {view === "aco-explorer" && (
+            <ACOExplorerView 
+              boards={boards} 
+              selectedBoardId={selectedBoardId}
+              setSelectedBoardId={handleBoardChange} 
+            />
+          )}
           {view === "stats" && (
             <StatisticsView onCompare={handleCompare} />
           )}
