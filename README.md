@@ -1,20 +1,3 @@
-# ⚡️ PCB Routing Optimizer
+# PCB Routing Optimizer: A Nature-Inspired Computing Approach
 
-An advanced research dashboard for visualizing and analyzing Printed Circuit Board (PCB) routing algorithms. This tool provides a professional interface to experiment with A*, Genetic Algorithms (GA), and Ant Colony Optimization (ACO).
-
-## 🚀 Key Features
-
-- **Interactive PCB Canvas**: Native HTML5 Canvas with support for high-density routing visualization, zooming, and panning.
-- **Algorithm Analysis**: 
-  - **A* Baseline**: Quick greedy routing reference.
-  - **GA Explorer**: Experiment with mutation/crossover rates and population size.
-  - **ACO Explorer**: Deep dive into pheromone weights, heuristics, and evaporation rates.
-- **Visual Analytics**: Real-time fitness convergence charts, parameter sensitivity scatter plots, and multi-run comparison tools.
-- **DEF Support**: Upload standard `.def` board definitions for instant routing experiments.
-
-## 🛠 Tech Stack
-
-- **Frontend**: React 18, Tailwind CSS
-- **Visualization**: Recharts, HTML5 Canvas API
-- **Icons**: Lucide React
-- **Solver Connection**: REST API Client
+This project tackles the complex combinatorial problem of Printed Circuit Board (PCB) trace routing by leveraging nature-inspired computing algorithms, specifically Genetic Algorithms (GA) and Ant Colony Optimization (ACO), alongside a baseline A* search. The objective is to efficiently connect multi-pin nets on a grid while minimizing total wire length and via count, while heavily penalizing wire overlaps (congestion and overflow) and out-of-bound infeasibilities. By comparing the evolutionary exploration of GA with the pheromone-based collective intelligence of ACO, this tool provides an interactive environment to evaluate and tune the efficacy of nature-inspired techniques in solving highly constrained hardware routing optimization problems.
